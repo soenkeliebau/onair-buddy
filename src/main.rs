@@ -19,11 +19,45 @@ pub enum Error {
 pub struct State {
     headset_id: Option<u32>,
     active_links: HashSet<u32>,
+    on_air: bool,
 }
 
 impl State {
     pub fn is_link_in_scope(&self, output_node: &u32) -> bool {
         self.headset_id.map_or(false, |id| id.eq(output_node))
+    }
+
+    fn update_on_air(&mut self) {
+        let current_on_air = self.check_if_on_air();
+        if current_on_air != self.on_air {
+            // states don't match, update
+            info!("On Air state changed from [{}] to [{}], running hook..", self.on_air, current_on_air);
+            self.on_air = current_on_air;
+            self.run_on_air_hook();
+        }
+    }
+
+    pub fn set_headset_id(&mut self, id :&u32) {
+        self.headset_id = Some(id.clone());
+        self.update_on_air();
+    }
+
+    pub fn add_link(&mut self, id: &u32) {
+        self.active_links.insert(id.clone());
+        self.update_on_air()
+    }
+
+    pub fn remove_link(&mut self, id: &u32) {
+        self.active_links.remove(id);
+        self.update_on_air();
+    }
+
+   fn run_on_air_hook(&self) -> Result<(), Error> {
+       Ok(())
+   }
+
+    pub fn check_if_on_air(&self) -> bool {
+        self.on_air
     }
 }
 
@@ -48,11 +82,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         if let Some(node_description) = node_props.get("node.description") {
                             if node_description.eq("Jabra Engage 75 Mono") {
                                 info!("Identified id [{}] as headset", global.id);
-                                let state_local = global_state.clone();
-                                let mut state_write = state_local.write().unwrap();
-                                state_write.headset_id = Some(global.id);
-                                // Need to decide if we need to reset active links here somehow
-                                drop(state_write);
+                                global_state.clone().write().unwrap().set_headset_id(&global.id);
                             }
                             local_registry
                                 .clone()
@@ -81,10 +111,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 .clone()
                                 .write()
                                 .unwrap()
-                                .active_links
-                                .insert(global.id);
-                            info!("On Air: [{:?}]", check_if_on_air(global_state.clone()));
-                            debug!("dropped write lock");
+                                .add_link(&global.id);
+                            info!("On Air: [{:?}]", global_state.clone().read().unwrap().check_if_on_air());
+                            debug!("dropped write lock for updating id [{}]", global.id);
                         } else {
                             let reg_read = reg.read().unwrap();
                             debug!(
@@ -109,22 +138,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .global_remove(move |id| {
             if remove_state.clone().read().unwrap().active_links.contains(&id) {
                 info!("In scope link [{}] removed.", id);
-                remove_state.clone().write().unwrap().active_links.remove(&id);
-                info!("On Air: [{:?}]", check_if_on_air(remove_state.clone()));
+                remove_state.clone().write().unwrap().remove_link(&id);
+                info!("On Air: [{:?}]", remove_state.clone().read().unwrap().check_if_on_air());
 
             }
         })
         .register();
-
-
-
-
-    // Calling the `destroy_global` method on the registry will destroy the object with the specified id on the remote.
-    // We don't have a specific object to destroy now, so this is commented out.
-    // registry.destroy_global(313).into_result()?;
-
     mainloop.run();
-
     Ok(())
 }
 
@@ -140,6 +160,4 @@ pub fn get_output_node(props: &ForeignDict) -> Result<&str, Error> {
     })
 }
 
-pub fn check_if_on_air(state: Arc<RwLock<State>>) -> bool {
-    !state.read().unwrap().active_links.is_empty()
-}
+
