@@ -10,6 +10,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let mut devices_in_scope = HashSet::new();
     devices_in_scope.insert("Built-in Audio Analog Stereo".to_string());
+    devices_in_scope.insert("M300-XT v1.06".to_string());
 
     let mut devices_ignored = HashSet::new();
     devices_ignored.insert("PulseAudio Volume Control".to_string());

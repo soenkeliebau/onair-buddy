@@ -1,9 +1,10 @@
 use pipewire::prelude::ReadableDict;
 use pipewire::spa::{ForeignDict, ParsableValue};
 use pipewire::types::ObjectType;
-use pipewire::{Context, MainLoop};
+use pipewire::{Context, MainLoop, keys};
 use snafu::prelude::*;
 use std::collections::{HashMap, HashSet};
+use std::process::Command;
 use std::string::ToString;
 use std::sync::{Arc, RwLock};
 use tracing::{debug, info, warn};
@@ -17,19 +18,29 @@ pub enum Error {
 }
 
 pub trait OnAirActor {
-    fn go_on_air();
-    fn go_off_air();
+    fn go_on_air(&self);
+    fn go_off_air(&self);
 }
 
 pub struct DebugActor {}
 
 impl OnAirActor for DebugActor {
-    fn go_on_air() {
+    fn go_on_air(&self) {
         warn!("going on air!");
+        Command::new("sh")
+            .arg("-c")
+            .arg("notify-send \"Going on air!\"")
+            .output()
+            .expect("failed to execute process");
     }
 
-    fn go_off_air() {
+    fn go_off_air(&self) {
         warn!("going off air!");
+        Command::new("sh")
+            .arg("-c")
+            .arg("notify-send \"Going off air!\"")
+            .output()
+            .expect("failed to execute process");
     }
 }
 pub struct RecordingWatcher<T>
@@ -118,7 +129,7 @@ impl<T: OnAirActor + 'static> RecordingWatcher<T> {
     }
 }
 
-struct State<T> {
+struct State<T> where T: OnAirActor {
     devices_in_scope: HashSet<String>,
     devices_ignored: HashSet<String>,
     ids_in_scope: HashSet<u32>,
@@ -129,7 +140,7 @@ struct State<T> {
     actor: T,
 }
 
-impl<T> State<T> {
+impl<T> State<T> where T:OnAirActor{
     pub fn new(
         devices_in_scope: HashSet<String>,
         devices_ignored: HashSet<String>,
@@ -167,7 +178,7 @@ impl<T> State<T> {
                 self.run_on_air_hook();
             } else {
                 info!("running off air hook");
-                self.run_on_air_hook();
+                self.run_off_air_hook();
             }
         }
     }
@@ -236,10 +247,12 @@ impl<T> State<T> {
     }
 
     fn run_on_air_hook(&self) -> Result<(), Error> {
+        self.actor.go_on_air();
         Ok(())
     }
 
     fn run_off_air_hook(&self) -> Result<(), Error> {
+        self.actor.go_off_air();
         Ok(())
     }
 
@@ -261,7 +274,7 @@ fn get_output_node(props: &ForeignDict) -> Result<&str, Error> {
 }
 
 fn get_all_names(props: &ForeignDict) -> Vec<&str> {
-    ["node.name", "node.description"]
+    [&keys::NODE_DESCRIPTION, &keys::NODE_NICK, &keys::NODE_NAME]
         .into_iter()
         .map(|prop_name| props.get(prop_name))
         .flatten()
